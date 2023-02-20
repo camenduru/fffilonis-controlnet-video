@@ -241,4 +241,4 @@ with gr.Blocks(css='style.css') as demo:
 
     
     
-demo.launch().queue(max_size=12)
+demo.queue(max_size=12).launch()
