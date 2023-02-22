@@ -50,6 +50,9 @@ def controlnet(i, prompt, control_task, seed_in, ddim_steps, scale):
     eta = 0.0
     low_threshold = 100
     high_threshold = 200
+    value_threshold = 0.1
+    distance_threshold = 0.1
+    bg_threshold = 0.4
     
     if control_task == 'Canny':
         result = model.process_canny(np_img, prompt, a_prompt, n_prompt, num_samples,
@@ -57,14 +60,32 @@ def controlnet(i, prompt, control_task, seed_in, ddim_steps, scale):
     elif control_task == 'Depth':
         result = model.process_depth(np_img, prompt, a_prompt, n_prompt, num_samples,
             image_resolution, detect_resolution, ddim_steps, scale, seed_in, eta)
+    elif control_task == 'Hed':
+        result = model.process_hed(np_img, prompt, a_prompt, n_prompt, num_samples,
+            image_resolution, detect_resolution, ddim_steps, scale, seed_in, eta)
+    elif control_task == 'Hough':
+        result = model.process_hough(np_img, prompt, a_prompt, n_prompt, num_samples,
+            image_resolution, detect_resolution, ddim_steps, scale, seed_in, eta, value_threshold,
+                      distance_threshold)
+    elif control_task == 'Normal':
+        result = model.process_normal(np_img, prompt, a_prompt, n_prompt, num_samples,
+            image_resolution, detect_resolution, ddim_steps, scale, seed_in, eta, bg_threshold)
     elif control_task == 'Pose':
         result = model.process_pose(np_img, prompt, a_prompt, n_prompt, num_samples,
             image_resolution, detect_resolution, ddim_steps, scale, seed_in, eta)
+    elif control_task == 'Scribble':
+        result = model.process_scribble(np_img, prompt, a_prompt, n_prompt, num_samples,
+            image_resolution, ddim_steps, scale, seed_in, eta)
+    elif control_task == 'Seg':
+        result = model.process_seg(np_img, prompt, a_prompt, n_prompt, num_samples,
+            image_resolution, detect_resolution, ddim_steps, scale, seed_in, eta)
     
     #print(result[0])
+    processor_im = Image.fromarray(result[0])
+    processor_im.save("process_" + control_task + "_" + str(i) + ".jpeg")
     im = Image.fromarray(result[1])
     im.save("your_file" + str(i) + ".jpeg")
-    return "your_file" + str(i) + ".jpeg"
+    return "your_file" + str(i) + ".jpeg", "process_" + control_task + "_" + str(i) + ".jpeg"
 
 
 def get_frames(video_in):
@@ -105,15 +126,24 @@ def get_frames(video_in):
     return frames, fps
 
 
-def create_video(frames, fps):
+def convert(gif):
+    if gif != None:
+        clip = VideoFileClip(gif.name)
+        clip.write_videofile("my_gif_video.mp4")
+        return "my_gif_video.mp4"
+    else:
+        pass
+
+
+def create_video(frames, fps, type):
     print("building video result")
     clip = ImageSequenceClip(frames, fps=fps)
-    clip.write_videofile("movie.mp4", fps=fps)
+    clip.write_videofile(type + "_result.mp4", fps=fps)
     
-    return 'movie.mp4'
+    return type + "_result.mp4"
 
 
-def infer(prompt,video_in, control_task, seed_in, trim_value, ddim_steps, scale):
+def infer(prompt,video_in, control_task, seed_in, trim_value, ddim_steps, scale, gif_import):
     print(f"""
     ———————————————
     {prompt}
@@ -129,7 +159,8 @@ def infer(prompt,video_in, control_task, seed_in, trim_value, ddim_steps, scale)
         print("video is shorter than the cut value")
         n_frame = len(frames_list)
     
-    # 2. prepare frames result array
+    # 2. prepare frames result arrays
+    processor_result_frames = []
     result_frames = []
     print("set stop frames to: " + str(n_frame))
     
@@ -140,14 +171,27 @@ def infer(prompt,video_in, control_task, seed_in, trim_value, ddim_steps, scale)
   
         # exporting the image
         #rgb_im.save(f"result_img-{i}.jpg")
-        result_frames.append(controlnet_img)
+        processor_result_frames.append(controlnet_img[1])
+        result_frames.append(controlnet_img[0])
         print("frame " + i + "/" + str(n_frame) + ": done;")
 
-    final_vid = create_video(result_frames, fps)
+    processor_vid = create_video(processor_result_frames, fps, "processor")
+    final_vid = create_video(result_frames, fps, "final")
+
+    files = [processor_vid, final_vid]
+    if gif_import != None:
+        final_gif = VideoFileClip(final_vid)
+        final_gif.write_gif("final_result.gif")
+        final_gif = "final_result.gif"
+
+        files.append(final_gif)
     print("finished !")
     
-    return final_vid, gr.Group.update(visible=True)
-    #return controlnet_img
+    return final_vid, gr.Accordion.update(visible=True), gr.Video.update(value=processor_vid, visible=True), gr.File.update(value=files, visible=True), gr.Group.update(visible=True)
+
+
+def clean():
+    return gr.Accordion.update(visible=False),gr.Video.update(value=None, visible=False), gr.Video.update(value=None), gr.File.update(value=None, visible=False), gr.Group.update(visible=False)
 
 title = """
     <div style="text-align: center; max-width: 700px; margin: 0 auto;">
@@ -199,6 +243,9 @@ with gr.Blocks(css='style.css') as demo:
             with gr.Column():
                 video_inp = gr.Video(label="Video source", source="upload", type="filepath", elem_id="input-vid")
                 video_out = gr.Video(label="ControlNet video result", elem_id="video-output")
+                with gr.Accordion("Detailed results", visible=False) as detailed_result:
+                    prep_video_out = gr.Video(label="Preprocessor video result", visible=False, elem_id="prep-video-output")
+                    files = gr.File(label="Files can be downloaded ;)", visible=False)
                 with gr.Group(elem_id="share-btn-container", visible=False) as share_group:
                     community_icon = gr.HTML(community_icon_html)
                     loading_icon = gr.HTML(loading_icon_html)
@@ -207,20 +254,27 @@ with gr.Blocks(css='style.css') as demo:
                 #status = gr.Textbox()
                 
                 prompt = gr.Textbox(label="Prompt", placeholder="enter prompt", show_label=True, elem_id="prompt-in")
-                control_task = gr.Dropdown(label="Control Task", choices=["Canny", "Depth", "Pose"], value="Pose", multiselect=False)
                 with gr.Row():
-                    seed_inp = gr.Slider(label="Seed", minimum=0, maximum=2147483647, step=1, value=123456)
+                    control_task = gr.Dropdown(label="Control Task", choices=["Canny", "Depth", "Hed", "Hough", "Normal", "Pose", "Scribble", "Seg"], value="Pose", multiselect=False, elem_id="controltask-in")
+                    seed_inp = gr.Slider(label="Seed", minimum=0, maximum=2147483647, step=1, value=123456, elem_id="seed-in")
+                with gr.Row():
+                    
                     trim_in = gr.Slider(label="Cut video at (s)", minimun=1, maximum=5, step=1, value=1)
-                ddim_steps = gr.Slider(label='Steps',
+                with gr.Accordion("Advanced Options", open=False):
+                    
+                    ddim_steps = gr.Slider(label='Steps',
                                        minimum=1,
                                        maximum=100,
                                        value=20,
                                        step=1)
-                scale = gr.Slider(label='Guidance Scale',
+                    scale = gr.Slider(label='Guidance Scale',
                                   minimum=0.1,
                                   maximum=30.0,
                                   value=9.0,
                                   step=0.1)
+                    
+                    gif_import = gr.File(label="import a GIF instead", file_types=['.gif'])
+                    gif_import.change(convert, gif_import, video_inp, queue=False)
                 
                 submit_btn = gr.Button("Generate ControlNet video")
                 
@@ -229,13 +283,14 @@ with gr.Blocks(css='style.css') as demo:
                 work with longer videos / skip the queue: 
                 """, elem_id="duplicate-container")
         
-        inputs = [prompt,video_inp,control_task, seed_inp, trim_in, ddim_steps, scale]
-        outputs = [video_out, share_group]
+        inputs = [prompt,video_inp,control_task, seed_inp, trim_in, ddim_steps, scale, gif_import]
+        outputs = [video_out, detailed_result, prep_video_out, files, share_group]
         #outputs = [status]
         
         
         gr.HTML(article)
-    
+
+    submit_btn.click(clean, inputs=[], outputs=[detailed_result, prep_video_out, video_out, files, share_group], queue=False)
     submit_btn.click(infer, inputs, outputs)
     share_button.click(None, [], [], _js=share_js)
 
