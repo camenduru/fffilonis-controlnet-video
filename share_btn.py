@@ -35,8 +35,11 @@ share_js = """async () => {
     
     const gradioEl = document.querySelector("gradio-app").shadowRoot || document.querySelector('body > gradio-app');
     const captionTxt = gradioEl.querySelector('#prompt-in textarea').value;
+    const controlTask = gradioEl.querySelector('#controltask-in select').value;
+    const seedValue = gradioEl.querySelector('#seed-in input').value;
     const inputVidEl = gradioEl.querySelector('#input-vid video');
     const outputVideo = gradioEl.querySelector('#video-output video');
+    const outputPrepVideo = gradioEl.querySelector('#prep-video-output video');
     
     const shareBtnEl = gradioEl.querySelector('#share-btn');
     const shareIconEl = gradioEl.querySelector('#share-btn-share-icon');
@@ -50,12 +53,23 @@ share_js = """async () => {
     
     const inputFile = await getVideoBlobFile(inputVidEl);
     const urlInputVid = await uploadFile(inputFile);
+    
+    const prepVideoOutFile = await getVideoBlobFile(outputPrepVideo);
+	const dataOutputPrepVid = await uploadFile(prepVideoOutFile);
+    
     const videoOutFile = await getVideoBlobFile(outputVideo);
 	const dataOutputVid = await uploadFile(videoOutFile);
     
     const descriptionMd = `
+#### Settings
+Prompt: ${captionTxt}
+Control Task: ${controlTask} • Seed: ${seedValue}
+
 #### Video input:
 ${urlInputVid}
+
+#### Preprcessor output:
+${dataOutputPrepVid}
 
 #### ControlNet result:
 ${dataOutputVid}
