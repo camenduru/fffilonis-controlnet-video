@@ -17,6 +17,10 @@ a, a:hover, a:visited {
   color: #f3f4f6 !important;
 }
 
+.label-wrap {
+  margin-bottom: 12px;
+}
+
 .footer {
   margin-bottom: 45px;
   margin-top: 10px;
